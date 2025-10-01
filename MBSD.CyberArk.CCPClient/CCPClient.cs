@@ -333,10 +333,27 @@ namespace MBSD.CyberArk.CCPClient
         /// </summary>
         private static string GetCertificateCacheKey(CertificateConfig config)
         {
-            if (!string.IsNullOrWhiteSpace(config.FilePath))
-                return $"file:{config.FilePath}:{config.Password}";
-            
-            return $"store:{config.Thumbprint}:{config.StoreLocation}:{config.StoreName}";
+            switch (config.Source)
+            {
+                case CertificateSource.File:
+                    return $"file:{config.FilePath}:{config.Password}";
+                case CertificateSource.Store:
+                    return $"store:{config.Thumbprint}:{config.StoreLocation}:{config.StoreName}";
+                case CertificateSource.Binary:
+                    if (string.IsNullOrWhiteSpace(config.Thumbprint))
+                    {
+                        // Calculate thumbprint for cache key
+                        var certificate = string.IsNullOrWhiteSpace(config.Password)
+                            ? new X509Certificate2(config.BinaryCertificate)
+                            : new X509Certificate2(config.BinaryCertificate, config.Password);
+                        config.Thumbprint = certificate.Thumbprint;
+                    }
+                    return $"binary:{config.Thumbprint}";
+                case CertificateSource.None:
+                default:
+                    throw new ArgumentOutOfRangeException($"Unexpected certificate source {nameof(config.Source)}");
+
+            }
         }
 
         /// <summary>
@@ -378,37 +395,45 @@ namespace MBSD.CyberArk.CCPClient
         /// </summary>
         private static X509Certificate2 LoadCertificate(CertificateConfig config)
         {
-            if (!string.IsNullOrWhiteSpace(config.FilePath))
+            switch (config.Source)
             {
-                return !string.IsNullOrWhiteSpace(config.Password)
-                    ? new X509Certificate2(config.FilePath, config.Password)
-                    : new X509Certificate2(config.FilePath);
-            }
-
-            if (!string.IsNullOrWhiteSpace(config.Thumbprint))
-            {
-                X509Store store = new X509Store(config.StoreName, config.StoreLocation);
-                try
+                case CertificateSource.File:
+                    return !string.IsNullOrWhiteSpace(config.Password)
+                        ? new X509Certificate2(config.FilePath, config.Password)
+                        : new X509Certificate2(config.FilePath);
+                
+                case CertificateSource.Store:
                 {
-                    store.Open(OpenFlags.ReadOnly);
-
-                    var certificates = store.Certificates.Find(X509FindType.FindByThumbprint, config.Thumbprint, false);
-
-                    if (certificates.Count == 0)
+                    var store = new X509Store(config.StoreName, config.StoreLocation);
+                    try
                     {
-                        throw new CCPException(
-                            $"Certificate with thumbprint '{config.Thumbprint}' not found in store '{config.StoreName}' at location '{config.StoreLocation}'");
+                        store.Open(OpenFlags.ReadOnly);
+
+                        var certificates = store.Certificates.Find(X509FindType.FindByThumbprint, config.Thumbprint, false);
+
+                        if (certificates.Count == 0)
+                        {
+                            throw new CCPException(
+                                $"Certificate with thumbprint '{config.Thumbprint}' not found in store '{config.StoreName}' at location '{config.StoreLocation}'");
+                        }
+
+                        return certificates[0];
                     }
-
-                    return certificates[0];
+                    finally
+                    {
+                        store.Dispose();
+                    }
                 }
-                finally
-                {
-                    store.Dispose();
-                }
+                    
+                case CertificateSource.Binary:
+                    return !string.IsNullOrWhiteSpace(config.Password)
+                        ? new X509Certificate2(config.BinaryCertificate, config.Password)
+                        : new X509Certificate2(config.BinaryCertificate);
+                
+                case CertificateSource.None:
+                default:
+                    throw new ArgumentOutOfRangeException($"Unexpected certificate source {nameof(config.Source)}");
             }
-
-            throw new CCPException("Invalid certificate configuration");
         }
 
         /// <summary>

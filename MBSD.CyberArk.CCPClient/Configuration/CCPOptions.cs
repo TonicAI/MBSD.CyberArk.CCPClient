@@ -68,10 +68,42 @@ namespace MBSD.CyberArk.CCPClient.Configuration
     }
 
     /// <summary>
+    /// Certificate source
+    /// </summary>
+    public enum CertificateSource
+    {
+        /// <summary>
+        /// No source specified
+        /// </summary>
+        None,
+        
+        /// <summary>
+        /// Certificate comes from external file
+        /// </summary>
+        File,
+        
+        /// <summary>
+        /// Certificate comes from certificate store via thumbprint
+        /// </summary>
+        Store,
+        
+        /// <summary>
+        /// Certificate is provided in binary format 
+        /// </summary>
+        Binary,
+    }
+
+    /// <summary>
     /// Certificate configuration for client authentication
     /// </summary>
     public class CertificateConfig
     {
+        /// <summary>
+        /// Identifies the source of the certificate
+        /// </summary>
+        public CertificateSource Source = CertificateSource.None;
+        
+        #region Certificate file
         /// <summary>
         /// Client certificate path for certificate-based authentication
         /// </summary>
@@ -81,7 +113,9 @@ namespace MBSD.CyberArk.CCPClient.Configuration
         /// Client certificate password
         /// </summary>
         public string Password { get; set; } = string.Empty;
+        #endregion
 
+        #region Certificate store
         /// <summary>
         /// Client certificate thumbprint (for loading from certificate store)
         /// </summary>
@@ -96,33 +130,80 @@ namespace MBSD.CyberArk.CCPClient.Configuration
         /// Certificate store name (default: My)
         /// </summary>
         public StoreName StoreName { get; set; } = StoreName.My;
-
+        #endregion
+        
+        #region Binary certificate
+        /// <summary>
+        /// Binary certificate (default: empty array)
+        /// </summary>
+        public byte[] BinaryCertificate = Array.Empty<byte>();
+        #endregion
+        
         /// <summary>
         /// Indicates whether certificate authentication is configured
         /// </summary>
-        public bool IsConfigured => 
-            !string.IsNullOrWhiteSpace(FilePath) || 
-            !string.IsNullOrWhiteSpace(Thumbprint);
+        public bool IsConfigured => Source != CertificateSource.None;
 
         /// <summary>
         /// Validates the certificate configuration
         /// </summary>
         public void Validate()
         {
-            if (!string.IsNullOrWhiteSpace(FilePath) && !string.IsNullOrWhiteSpace(Thumbprint))
-                throw new ArgumentException("Cannot specify both FilePath and Thumbprint in certificate configuration");
+            switch (Source)
+            {
+                case CertificateSource.File:
+                    if (string.IsNullOrWhiteSpace(FilePath))
+                    {
+                        throw new ArgumentException("FilePath is required", nameof(FilePath));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(Thumbprint) ||
+                        (BinaryCertificate != null && BinaryCertificate.Length > 0))
+                    {
+                        throw new ArgumentException("Cannot specify multiple sources", nameof(FilePath));
+                    }
+                    break;
+                case CertificateSource.Store:
+                    if (string.IsNullOrWhiteSpace(Thumbprint))
+                    {
+                        throw new ArgumentException("Thumbprint is required", nameof(Thumbprint));
+                    }
+                    if (!string.IsNullOrWhiteSpace(FilePath) ||
+                        (BinaryCertificate != null && BinaryCertificate.Length > 0))
+                    {
+                        throw new ArgumentException("Cannot specify multiple sources", nameof(Thumbprint));
+                    }
+                    break;
+                case CertificateSource.Binary:
+                    if (BinaryCertificate == null || BinaryCertificate.Length == 0)
+                    {
+                        throw new ArgumentException("Binary certificate is required", nameof(BinaryCertificate));
+                    }
+                    if (!string.IsNullOrWhiteSpace(FilePath) && !string.IsNullOrWhiteSpace(Thumbprint))
+                        throw new ArgumentException("Cannot specify multiple sources", nameof(BinaryCertificate));
+                    break;
+                case CertificateSource.None:
+                default:
+                    throw new ArgumentOutOfRangeException($"Unexpected certificate source {nameof(Source)}");
+            }
         }
 
         /// <summary>
         /// Creates a certificate config from file path
         /// </summary>
         public static CertificateConfig FromFile(string filePath, string password = null) =>
-            new CertificateConfig { FilePath = filePath, Password = password ?? string.Empty };
+            new CertificateConfig { Source = CertificateSource.File, FilePath = filePath, Password = password ?? string.Empty };
 
         /// <summary>
         /// Creates a certificate config from certificate store
         /// </summary>
         public static CertificateConfig FromStore(string thumbprint, StoreLocation storeLocation = StoreLocation.CurrentUser, StoreName storeName = StoreName.My) =>
-            new CertificateConfig { Thumbprint = thumbprint, StoreLocation = storeLocation, StoreName = storeName };
+            new CertificateConfig { Source = CertificateSource.Store, Thumbprint = thumbprint, StoreLocation = storeLocation, StoreName = storeName };
+        
+        /// <summary>
+        /// Creates a certificate config from binary data
+        /// </summary>
+        public static CertificateConfig FromBinaryData(byte[] certificate) =>
+            new CertificateConfig { Source = CertificateSource.Binary, BinaryCertificate = certificate };
     }
 }
