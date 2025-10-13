@@ -203,7 +203,7 @@ namespace MBSD.CyberArk.CCPClient.Configuration
         /// <summary>
         /// Creates a certificate config from binary data
         /// </summary>
-        public static CertificateConfig FromBinaryData(byte[] certificate) =>
-            new CertificateConfig { Source = CertificateSource.Binary, BinaryCertificate = certificate };
+        public static CertificateConfig FromBinaryData(byte[] certificate, string password = null) =>
+            new CertificateConfig { Source = CertificateSource.Binary, BinaryCertificate = certificate, Password = password ?? string.Empty };
     }
 }
