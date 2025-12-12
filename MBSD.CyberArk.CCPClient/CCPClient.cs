@@ -98,8 +98,11 @@ namespace MBSD.CyberArk.CCPClient
                 var requestUri = $"{_options.BaseUrl.TrimEnd('/')}{_options.Endpoint}?{queryString}";
 
                 _logger.LogDebug("Making CCP request to: {RequestUri}", SanitizeUriForLogging(requestUri));
+                
+                // Create a Uri object to ensure proper escaping
+                var uri = new Uri(requestUri, UriKind.Absolute);
 
-                var response = await httpClient.GetAsync(requestUri, cancellationToken);
+                var response = await httpClient.GetAsync(uri, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -443,33 +446,33 @@ namespace MBSD.CyberArk.CCPClient
         {
             var parameters = new List<string>
             {
-                $"AppID={HttpUtility.UrlEncode(applicationId)}",
-                $"Object={HttpUtility.UrlEncode(request.Object)}"
+                $"AppID={applicationId}",
+                $"Object={request.Object}"
             };
 
             if (!string.IsNullOrWhiteSpace(request.Safe))
-                parameters.Add($"Safe={HttpUtility.UrlEncode(request.Safe)}");
+                parameters.Add($"Safe={request.Safe}");
 
             if (!string.IsNullOrWhiteSpace(request.Folder))
-                parameters.Add($"Folder={HttpUtility.UrlEncode(request.Folder)}");
+                parameters.Add($"Folder={request.Folder}");
 
             if (!string.IsNullOrWhiteSpace(request.UserName))
-                parameters.Add($"UserName={HttpUtility.UrlEncode(request.UserName)}");
+                parameters.Add($"UserName={request.UserName}");
 
             if (!string.IsNullOrWhiteSpace(request.Address))
-                parameters.Add($"Address={HttpUtility.UrlEncode(request.Address)}");
+                parameters.Add($"Address={request.Address}");
 
             if (!string.IsNullOrWhiteSpace(request.Database))
-                parameters.Add($"Database={HttpUtility.UrlEncode(request.Database)}");
+                parameters.Add($"Database={request.Database}");
 
             if (!string.IsNullOrWhiteSpace(request.PolicyID))
-                parameters.Add($"PolicyID={HttpUtility.UrlEncode(request.PolicyID)}");
+                parameters.Add($"PolicyID={request.PolicyID}");
 
             foreach (var param in request.CustomParameters)
             {
                 if (!string.IsNullOrWhiteSpace(param.Key) && param.Value != null)
                 {
-                    parameters.Add($"{HttpUtility.UrlEncode(param.Key)}={HttpUtility.UrlEncode(param.Value)}");
+                    parameters.Add($"{param.Key}={param.Value}");
                 }
             }
 
