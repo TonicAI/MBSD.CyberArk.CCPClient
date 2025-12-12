@@ -81,17 +81,14 @@ namespace MBSD.CyberArk.CCPClient
             if (request == null)
                 throw new ArgumentNullException(nameof(request));
 
-            if (string.IsNullOrWhiteSpace(request.Object))
-                throw new ArgumentException("Object name is required", nameof(request));
-
             var applicationId = GetEffectiveApplicationId(request);
             if (string.IsNullOrWhiteSpace(applicationId))
                 throw new ArgumentException("Application ID must be specified either in request or in options.DefaultApplicationId");
 
             try
             {
-                _logger.LogDebug("Retrieving secret for object: {ObjectName} using Application ID: {ApplicationId}", 
-                    request.Object, applicationId);
+                _logger.LogDebug("Retrieving secret for object: {Object} using Application ID: {ApplicationId}", 
+                    request.FullIdentifier(), applicationId);
 
                 var httpClient = await GetHttpClientForRequestAsync(request);
                 var queryString = BuildQueryString(request, applicationId);
@@ -111,42 +108,42 @@ namespace MBSD.CyberArk.CCPClient
                         response.StatusCode, errorContent);
                     
                     throw new CCPException(
-                        $"Failed to retrieve secret '{request.Object}' using Application ID '{applicationId}'. Status: {response.StatusCode}",
+                        $"Failed to retrieve secret '{request.FullIdentifier()}' using Application ID '{applicationId}'. Status: {response.StatusCode}",
                         httpStatusCode: (int)response.StatusCode,
                         responseContent: errorContent,
                         applicationId: applicationId);
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
-                _logger.LogDebug("CCP response received successfully for object: {ObjectName}", request.Object);
+                _logger.LogDebug("CCP response received successfully for object: {Object}", request.FullIdentifier());
 
                 var ccpSecret = JsonConvert.DeserializeObject<CCPSecret>(jsonContent);
                 
                 if (ccpSecret == null)
                 {
-                    throw new CCPException($"Failed to deserialize CCP response for object '{request.Object}'", 
+                    throw new CCPException($"Failed to deserialize CCP response for object '{request.FullIdentifier()}'", 
                         applicationId: applicationId);
                 }
 
-                _logger.LogInformation("Successfully retrieved secret for object: {ObjectName}, Safe: {Safe}, Application ID: {ApplicationId}", 
-                    ccpSecret.Name, ccpSecret.Safe, applicationId);
+                _logger.LogInformation("Successfully retrieved secret for object: {Object}, Application ID: {ApplicationId}", 
+                    request.FullIdentifier(), applicationId);
 
                 return ccpSecret;
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "HTTP request exception while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Network error while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "HTTP request exception while retrieving secret for object: {Object}", request.FullIdentifier());
+                throw new CCPException($"Network error while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
             catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
             {
-                _logger.LogError(ex, "Request cancelled while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Request cancelled while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "Request cancelled while retrieving secret for object: {Object}", request.FullIdentifier());
+                throw new CCPException($"Request cancelled while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
             catch (TaskCanceledException ex)
             {
-                _logger.LogError(ex, "Request timeout while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Request timeout while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "Request timeout while retrieving secret for object: {Object}", request.FullIdentifier());
+                throw new CCPException($"Request timeout while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
         }
 
@@ -447,8 +444,10 @@ namespace MBSD.CyberArk.CCPClient
             var parameters = new List<string>
             {
                 $"AppID={applicationId}",
-                $"Object={request.Object}"
             };
+            
+            if (!string.IsNullOrWhiteSpace(request.Object))
+                parameters.Add($"Object={request.Object}");
 
             if (!string.IsNullOrWhiteSpace(request.Safe))
                 parameters.Add($"Safe={request.Safe}");

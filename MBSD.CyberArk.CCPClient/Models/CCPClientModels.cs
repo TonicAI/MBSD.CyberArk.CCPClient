@@ -1,7 +1,9 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using MBSD.CyberArk.CCPClient.Configuration;
 
 namespace MBSD.CyberArk.CCPClient.Models
@@ -153,6 +155,52 @@ namespace MBSD.CyberArk.CCPClient.Models
         {
             Folder = folderName;
             return this;
+        }
+
+        /// <summary>
+        /// Answers the secret identifier portion of the request for use in error messages
+        /// </summary>
+        /// <returns>Secret identifier</returns>
+        public string FullIdentifier()
+        {
+            if (!string.IsNullOrWhiteSpace(Object))
+            {
+                // If Object is present, show this as [Safe\][Folder\]Object
+                // We use backslashes because C3 is hosted on Windows and uses them in the Folder
+                var sb = new StringBuilder();
+                if (!string.IsNullOrWhiteSpace(Safe))
+                {
+                    sb.Append(Safe);
+                    sb.Append('\\');
+                }
+                if (!string.IsNullOrWhiteSpace(Folder))
+                {
+                    sb.Append(Folder);
+                    sb.Append('\\');
+                }
+                if (!string.IsNullOrWhiteSpace(Object))
+                {
+                    sb.Append(Object);
+                }
+                return sb.ToString();
+            }
+            
+            // Caller is using search criteria
+            var paramStrings = new List<string>();
+            
+            if (!string.IsNullOrWhiteSpace(Safe))
+            {
+                paramStrings.Add($"Safe={Safe}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(Folder))
+            {
+                paramStrings.Add($"Folder={Folder}");
+            }
+
+            paramStrings.AddRange(CustomParameters.Select(param => $"{param.Key}={param.Value}"));
+
+            return string.Join(",", paramStrings);
         }
     }
 
