@@ -50,7 +50,7 @@ namespace MBSD.CyberArk.CCPClient
     {
         private readonly HttpClient _defaultHttpClient;
         private readonly CCPOptions _options;
-        private readonly ILogger<CCPClient> _logger;
+        private readonly ILogger _logger;
         private readonly ConcurrentDictionary<string, HttpClient> _certificateHttpClients;
         private bool _disposed = false;
 
@@ -63,7 +63,7 @@ namespace MBSD.CyberArk.CCPClient
         public CCPClient(
             HttpClient httpClient,
             IOptions<CCPOptions> options,
-            ILogger<CCPClient> logger = null)
+            ILogger logger = null)
         {
             _defaultHttpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
