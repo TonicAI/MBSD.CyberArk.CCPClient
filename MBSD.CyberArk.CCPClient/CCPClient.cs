@@ -32,6 +32,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Net.Security;
 
 namespace MBSD.CyberArk.CCPClient
 {
@@ -133,7 +135,7 @@ namespace MBSD.CyberArk.CCPClient
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex, "HTTP request exception while retrieving secret for object: {Object}", request.FullIdentifier());
-                throw new CCPException($"Network error while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
+                 throw new CCPException($"Network error while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
             catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
             {
@@ -365,10 +367,34 @@ namespace MBSD.CyberArk.CCPClient
             
             if (!_options.VerifySsl)
             {
-                handler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true;
-                _logger.LogWarning("SSL certificate verification is disabled. This exposes you to security risks and is not recommended for use in production.");
+                 _logger.LogWarning("SSL certificate verification is disabled. This exposes you to security risks and is not recommended for use in production.");
             }
 
+            handler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) =>
+            {
+                if (!_options.VerifySsl || sslPolicyErrors == SslPolicyErrors.None)
+                {
+                    return true;
+                }
+
+                if (sslPolicyErrors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch))
+                {
+                    _logger.LogDebug("Certificate name mismatch. Subject: {Subject}", cert.Subject);
+
+                    // Extract Subject Alternative Names (SANs)
+                    var sanExtension = cert.Extensions
+                        .OfType<X509Extension>()
+                        .FirstOrDefault(ext => ext.Oid.FriendlyName == "Subject Alternative Name");
+
+                    if (sanExtension == null) return false;
+                    var asndata = new System.Security.Cryptography.AsnEncodedData(sanExtension.RawData);
+                    var sans = asndata.Format(true); 
+                    _logger.LogDebug("Subject Alternative Names: {SubjectAlternativeNames}", sans);
+                    // The formatted output might be a single string with multiple entries separated by newlines or commas
+                }
+                return false;
+            };
+            
             try
             {
                 var certificate = LoadCertificate(certificateConfig);
@@ -385,7 +411,7 @@ namespace MBSD.CyberArk.CCPClient
             var client = new HttpClient(handler);
             client.BaseAddress = new Uri(_options.BaseUrl);
             client.Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
-            client.DefaultRequestHeaders.Add("User-Agent", "MBSD-CyberArk-CCPClient/1.0.0");
+            client.DefaultRequestHeaders.Add("User-Agent", "MBSD-CyberArk-CCPClient/1.0.3.2");
             
             return client;
         }
