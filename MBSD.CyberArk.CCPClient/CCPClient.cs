@@ -32,6 +32,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Net.Security;
 
 namespace MBSD.CyberArk.CCPClient
 {
@@ -50,7 +52,7 @@ namespace MBSD.CyberArk.CCPClient
     {
         private readonly HttpClient _defaultHttpClient;
         private readonly CCPOptions _options;
-        private readonly ILogger<CCPClient> _logger;
+        private readonly ILogger _logger;
         private readonly ConcurrentDictionary<string, HttpClient> _certificateHttpClients;
         private bool _disposed = false;
 
@@ -63,7 +65,7 @@ namespace MBSD.CyberArk.CCPClient
         public CCPClient(
             HttpClient httpClient,
             IOptions<CCPOptions> options,
-            ILogger<CCPClient> logger = null)
+            ILogger logger = null)
         {
             _defaultHttpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
@@ -81,25 +83,25 @@ namespace MBSD.CyberArk.CCPClient
             if (request == null)
                 throw new ArgumentNullException(nameof(request));
 
-            if (string.IsNullOrWhiteSpace(request.Object))
-                throw new ArgumentException("Object name is required", nameof(request));
-
             var applicationId = GetEffectiveApplicationId(request);
             if (string.IsNullOrWhiteSpace(applicationId))
                 throw new ArgumentException("Application ID must be specified either in request or in options.DefaultApplicationId");
 
             try
             {
-                _logger.LogDebug("Retrieving secret for object: {ObjectName} using Application ID: {ApplicationId}", 
-                    request.Object, applicationId);
+                _logger.LogDebug("Retrieving secret for object: {Object} using Application ID: {ApplicationId}", 
+                    request.FullIdentifier(), applicationId);
 
                 var httpClient = await GetHttpClientForRequestAsync(request);
                 var queryString = BuildQueryString(request, applicationId);
                 var requestUri = $"{_options.BaseUrl.TrimEnd('/')}{_options.Endpoint}?{queryString}";
 
                 _logger.LogDebug("Making CCP request to: {RequestUri}", SanitizeUriForLogging(requestUri));
+                
+                // Create a Uri object to ensure proper escaping
+                var uri = new Uri(requestUri, UriKind.Absolute);
 
-                var response = await httpClient.GetAsync(requestUri, cancellationToken);
+                var response = await httpClient.GetAsync(uri, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -108,42 +110,42 @@ namespace MBSD.CyberArk.CCPClient
                         response.StatusCode, errorContent);
                     
                     throw new CCPException(
-                        $"Failed to retrieve secret '{request.Object}' using Application ID '{applicationId}'. Status: {response.StatusCode}",
+                        $"Failed to retrieve secret '{request.FullIdentifier()}' using Application ID '{applicationId}'. Status: {response.StatusCode}",
                         httpStatusCode: (int)response.StatusCode,
                         responseContent: errorContent,
                         applicationId: applicationId);
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
-                _logger.LogDebug("CCP response received successfully for object: {ObjectName}", request.Object);
+                _logger.LogDebug("CCP response received successfully for object: {Object}", request.FullIdentifier());
 
                 var ccpSecret = JsonConvert.DeserializeObject<CCPSecret>(jsonContent);
                 
                 if (ccpSecret == null)
                 {
-                    throw new CCPException($"Failed to deserialize CCP response for object '{request.Object}'", 
+                    throw new CCPException($"Failed to deserialize CCP response for object '{request.FullIdentifier()}'", 
                         applicationId: applicationId);
                 }
 
-                _logger.LogInformation("Successfully retrieved secret for object: {ObjectName}, Safe: {Safe}, Application ID: {ApplicationId}", 
-                    ccpSecret.Name, ccpSecret.Safe, applicationId);
+                _logger.LogInformation("Successfully retrieved secret for object: {Object}, Application ID: {ApplicationId}", 
+                    request.FullIdentifier(), applicationId);
 
                 return ccpSecret;
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "HTTP request exception while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Network error while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "HTTP request exception while retrieving secret for object: {Object}", request.FullIdentifier());
+                 throw new CCPException($"Network error while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
             catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
             {
-                _logger.LogError(ex, "Request cancelled while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Request cancelled while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "Request cancelled while retrieving secret for object: {Object}", request.FullIdentifier());
+                throw new CCPException($"Request cancelled while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
             catch (TaskCanceledException ex)
             {
-                _logger.LogError(ex, "Request timeout while retrieving secret for object: {ObjectName}", request.Object);
-                throw new CCPException($"Request timeout while retrieving secret '{request.Object}'", ex, applicationId: applicationId);
+                _logger.LogError(ex, "Request timeout while retrieving secret for object: {Object}", request.FullIdentifier());
+                throw new CCPException($"Request timeout while retrieving secret '{request.FullIdentifier()}'", ex, applicationId: applicationId);
             }
         }
 
@@ -365,10 +367,34 @@ namespace MBSD.CyberArk.CCPClient
             
             if (!_options.VerifySsl)
             {
-                handler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true;
-                _logger.LogWarning("SSL certificate verification is disabled. This exposes you to security risks and is not recommended for use in production.");
+                 _logger.LogWarning("SSL certificate verification is disabled. This exposes you to security risks and is not recommended for use in production.");
             }
 
+            handler.ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) =>
+            {
+                if (!_options.VerifySsl || sslPolicyErrors == SslPolicyErrors.None)
+                {
+                    return true;
+                }
+
+                if (sslPolicyErrors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch))
+                {
+                    _logger.LogDebug("Certificate name mismatch. Subject: {Subject}", cert.Subject);
+
+                    // Extract Subject Alternative Names (SANs)
+                    var sanExtension = cert.Extensions
+                        .OfType<X509Extension>()
+                        .FirstOrDefault(ext => ext.Oid.FriendlyName == "Subject Alternative Name");
+
+                    if (sanExtension == null) return false;
+                    var asndata = new System.Security.Cryptography.AsnEncodedData(sanExtension.RawData);
+                    var sans = asndata.Format(true); 
+                    _logger.LogDebug("Subject Alternative Names: {SubjectAlternativeNames}", sans);
+                    // The formatted output might be a single string with multiple entries separated by newlines or commas
+                }
+                return false;
+            };
+            
             try
             {
                 var certificate = LoadCertificate(certificateConfig);
@@ -385,7 +411,7 @@ namespace MBSD.CyberArk.CCPClient
             var client = new HttpClient(handler);
             client.BaseAddress = new Uri(_options.BaseUrl);
             client.Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
-            client.DefaultRequestHeaders.Add("User-Agent", "MBSD-CyberArk-CCPClient/1.0.0");
+            client.DefaultRequestHeaders.Add("User-Agent", "MBSD-CyberArk-CCPClient/1.0.3.2");
             
             return client;
         }
@@ -443,33 +469,35 @@ namespace MBSD.CyberArk.CCPClient
         {
             var parameters = new List<string>
             {
-                $"AppID={HttpUtility.UrlEncode(applicationId)}",
-                $"Object={HttpUtility.UrlEncode(request.Object)}"
+                $"AppID={applicationId}",
             };
+            
+            if (!string.IsNullOrWhiteSpace(request.Object))
+                parameters.Add($"Object={request.Object}");
 
             if (!string.IsNullOrWhiteSpace(request.Safe))
-                parameters.Add($"Safe={HttpUtility.UrlEncode(request.Safe)}");
+                parameters.Add($"Safe={request.Safe}");
 
             if (!string.IsNullOrWhiteSpace(request.Folder))
-                parameters.Add($"Folder={HttpUtility.UrlEncode(request.Folder)}");
+                parameters.Add($"Folder={request.Folder}");
 
             if (!string.IsNullOrWhiteSpace(request.UserName))
-                parameters.Add($"UserName={HttpUtility.UrlEncode(request.UserName)}");
+                parameters.Add($"UserName={request.UserName}");
 
             if (!string.IsNullOrWhiteSpace(request.Address))
-                parameters.Add($"Address={HttpUtility.UrlEncode(request.Address)}");
+                parameters.Add($"Address={request.Address}");
 
             if (!string.IsNullOrWhiteSpace(request.Database))
-                parameters.Add($"Database={HttpUtility.UrlEncode(request.Database)}");
+                parameters.Add($"Database={request.Database}");
 
             if (!string.IsNullOrWhiteSpace(request.PolicyID))
-                parameters.Add($"PolicyID={HttpUtility.UrlEncode(request.PolicyID)}");
+                parameters.Add($"PolicyID={request.PolicyID}");
 
             foreach (var param in request.CustomParameters)
             {
                 if (!string.IsNullOrWhiteSpace(param.Key) && param.Value != null)
                 {
-                    parameters.Add($"{HttpUtility.UrlEncode(param.Key)}={HttpUtility.UrlEncode(param.Value)}");
+                    parameters.Add($"{param.Key}={param.Value}");
                 }
             }
 
