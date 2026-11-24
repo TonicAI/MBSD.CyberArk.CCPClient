@@ -16,7 +16,7 @@
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>MBSD.CyberArk.CCPClient</PackageId>
-		<PackageVersion>1.0.3.2</PackageVersion>
+		<Version>1.1.0</Version>
 		<Authors>Matthew Bohan</Authors>
 		<Company>MBSD</Company>
 		<Product>MBSD CyberArk Central Credential Provider .NET Client</Product>
@@ -35,7 +35,6 @@
 
 	<ItemGroup>
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="Microsoft.Extensions.Http" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="6.0.0" />

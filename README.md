@@ -136,6 +136,28 @@ var secret = await CCPClient.GetSecretAsync(
 );
 
 
+### Supplying the handler for certificate authentication
+
+For certificate authentication the client builds its own `HttpClientHandler`. To control how those requests connect
+(for example, to restrict which addresses they may reach or to disable redirects), pass a handler factory. It receives
+the loaded client certificate; the handler it returns must attach that certificate and verify the server certificate
+itself, since `VerifySsl` does not apply to it. The client still sets the base address, timeout and User-Agent, and
+disposes the handler and certificate when it is disposed.
+
+    using var ccpClient = new CCPClient(httpClient, Options.Create(options), logger,
+        certificate =>
+        {
+            var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };
+            handler.SslOptions.ClientCertificates = new X509CertificateCollection { certificate };
+            return handler;
+        });
+
+### Response size
+
+`CCPOptions.MaxResponseContentBytes` (default 1 MiB) caps the response body the client reads; a larger response fails
+the request with a `CCPException`. `TimeoutSeconds` covers the whole request, including reading the body.
+
+
  
 
 ## License

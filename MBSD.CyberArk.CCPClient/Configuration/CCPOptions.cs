@@ -32,7 +32,16 @@ namespace MBSD.CyberArk.CCPClient.Configuration
         /// <summary>
         /// Whether to verify SSL certificates (default: true)
         /// </summary>
+        /// <remarks>
+        /// Applies only to the handler the client builds for certificate authentication. The <see cref="System.Net.Http.HttpClient"/>
+        /// passed to the client's constructor, and handlers from its certificate handler factory, verify (or not) on their own.
+        /// </remarks>
         public bool VerifySsl { get; set; } = true;
+
+        /// <summary>
+        /// Largest response body, in bytes, the client reads from CCP (default: 1 MiB). A larger response fails the request.
+        /// </summary>
+        public long MaxResponseContentBytes { get; set; } = 1024 * 1024;
 
         /// <summary>
         /// Default client certificate configuration (can be overridden per request)
@@ -51,6 +60,12 @@ namespace MBSD.CyberArk.CCPClient.Configuration
         {
             if (string.IsNullOrWhiteSpace(BaseUrl))
                 throw new ArgumentException("BaseUrl is required", nameof(BaseUrl));
+
+            if (TimeoutSeconds <= 0)
+                throw new ArgumentException("TimeoutSeconds must be positive", nameof(TimeoutSeconds));
+
+            if (MaxResponseContentBytes <= 0)
+                throw new ArgumentException("MaxResponseContentBytes must be positive", nameof(MaxResponseContentBytes));
 
             // Application ID is now optional at the client level since it can be provided per request
             
